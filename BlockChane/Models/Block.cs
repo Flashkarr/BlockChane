@@ -1,4 +1,6 @@
-﻿namespace BlockChane.Models
+﻿using System;
+
+namespace BlockChane.Models
 {
     public class Block
     {
@@ -16,6 +18,10 @@
         public int Nonce { get; set; }
 
         public long MiningTimeMs { get; set; }
+
+        public double MiningDurationSeconds { get; set; } = 0;
+
+        public int DifficultyAtMining { get; set; }
 
         public Block(int index, string data, string author, string prevHash, DateTime timestamp)
         {

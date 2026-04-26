@@ -1,10 +1,6 @@
-﻿using System;
+﻿using BlockChane.Models;
 using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using System.Text;
-using System.Threading.Tasks;
-using BlockChane.Models;
+using System;
 
 namespace BlockChane.Service
 {
@@ -19,6 +15,7 @@ namespace BlockChane.Service
                 Console.WriteLine($"Data: {block.Data}");
                 Console.WriteLine($"Hash: {block.Hash}");
                 Console.WriteLine($"PrevHash: {block.PrevHash}");
+                Console.WriteLine($"Difficulty: {block.DifficultyAtMining}");
                 Console.WriteLine(new string('-', 50));
             }
         }
