@@ -1,11 +1,7 @@
-﻿using BlockChane.Service;
+﻿using BlockChane.Models;
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
-namespace BlockChane.Models
+namespace BlockChane.Service
 {
     public class MiningService
     {
@@ -15,6 +11,7 @@ namespace BlockChane.Models
         {
             _hashingService = hashingService;
         }
+
         public long MineBlock(Block block, int difficulty)
         {
             var target = new string('0', difficulty);
@@ -35,17 +32,21 @@ namespace BlockChane.Models
                 if (block.Hash.StartsWith(target))
                 {
                     stopwatch.Stop();
+
+                    block.MiningTimeMs = stopwatch.ElapsedMilliseconds;
                     block.MiningDurationSeconds = stopwatch.Elapsed.TotalSeconds;
+
                     return block.Nonce;
                 }
             }
 
             stopwatch.Stop();
+
+            block.MiningTimeMs = stopwatch.ElapsedMilliseconds;
             block.MiningDurationSeconds = stopwatch.Elapsed.TotalSeconds;
+
             Console.WriteLine("Mining failed: too hard");
             return block.Nonce;
         }
-
-
     }
 }

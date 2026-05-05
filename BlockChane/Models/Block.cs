@@ -20,7 +20,8 @@ namespace BlockChane.Models
         public long MiningTimeMs { get; set; }
 
         public double MiningDurationSeconds { get; set; } = 0;
-
+        public List<Transaction> Transactions { get; set; }
+        public decimal TotalSupply { get; set; } = 0;
         public int DifficultyAtMining { get; set; }
 
         public Block(int index, string data, string author, string prevHash, DateTime timestamp)
@@ -32,6 +33,11 @@ namespace BlockChane.Models
             PrevHash = prevHash;
             Hash = "";
             Nonce = 0;
+        }
+
+        public decimal GetTotalSupply()
+        {
+            return TotalSupply;
         }
     }
 }
