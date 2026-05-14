@@ -1,4 +1,5 @@
 ﻿using System.Text;
+using System.Diagnostics;
 using BlockChane.Models;
 using BlockChane.Service;
 
@@ -12,19 +13,20 @@ var crypto = new CryptoService();
 var walletAlice = new Wallet(crypto);
 var walletBob = new Wallet(crypto);
 
-var pendingTransactions = new List<Transaction>();
-
 while (true)
 {
     Console.WriteLine("\n===== МЕНЮ =====");
-    Console.WriteLine("1 додати транзакцію");
-    Console.WriteLine("2 змайнити блок");
-    Console.WriteLine("3 показати блокчейн");
-    Console.WriteLine("4 перевірити валідність");
-    Console.WriteLine("5 баланси + TotalSupply");
-    Console.WriteLine("6 симуляція падіння (ClearState)");
-    Console.WriteLine("7 відновлення (RebuildState)");
-    Console.WriteLine("0 вихід");
+    Console.WriteLine("1 - Додати транзакцію");
+    Console.WriteLine("2 - Змайнити блок");
+    Console.WriteLine("3 - Показати блокчейн");
+    Console.WriteLine("4 - Перевірити валідність");
+    Console.WriteLine("5 - Баланси + TotalSupply");
+    Console.WriteLine("6 - ClearState");
+    Console.WriteLine("7 - RebuildState");
+    Console.WriteLine("8 - SaveStateSnapshot");
+    Console.WriteLine("9 - LoadStateSnapshot");
+    Console.WriteLine("10 - Benchmark");
+    Console.WriteLine("0 - Вихід");
 
     Console.Write("Вибір: ");
     var choice = Console.ReadLine();
@@ -34,22 +36,20 @@ while (true)
         case "1":
             try
             {
-                Console.WriteLine("\nдодати транзакцию");
-
-                Console.WriteLine("Відправник:");
-                Console.WriteLine("1 Alice");
-                Console.WriteLine("2 Bob");
+                Console.WriteLine("\nВідправник:");
+                Console.WriteLine("1 - Alice");
+                Console.WriteLine("2 - Bob");
                 var fromChoice = Console.ReadLine();
 
                 Console.WriteLine("Отримувач:");
-                Console.WriteLine("1 Alice");
-                Console.WriteLine("2 Bob");
+                Console.WriteLine("1 - Alice");
+                Console.WriteLine("2 - Bob");
                 var toChoice = Console.ReadLine();
 
                 Console.Write("Сума: ");
                 if (!decimal.TryParse(Console.ReadLine(), out decimal amount))
                 {
-                    Console.WriteLine("невірна сума");
+                    Console.WriteLine("Невірна сума");
                     break;
                 }
 
@@ -63,74 +63,126 @@ while (true)
                     fromWallet.PrivateKey
                 );
 
-                pendingTransactions.Add(tx);
+                blockchain.AddTransaction(tx);
 
-                Console.WriteLine("транзакцію додано");
+                Console.WriteLine("Транзакцію додано в Mempool");
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"помилка: {ex.Message}");
+                Console.WriteLine($"Помилка: {ex.Message}");
             }
+
             break;
 
         case "2":
-            Console.WriteLine("\nмайнинг");
-
-            Console.WriteLine("хто майнить");
-            Console.WriteLine("1 Alice");
-            Console.WriteLine("2 Bob");
+            Console.WriteLine("\nХто майнить?");
+            Console.WriteLine("1 - Alice");
+            Console.WriteLine("2 - Bob");
 
             var minerChoice = Console.ReadLine();
             var miner = minerChoice == "1" ? walletAlice : walletBob;
 
-            blockchain.MineBlock(miner.PublicKey, new List<Transaction>(pendingTransactions));
+            blockchain.MineBlock(miner.PublicKey);
 
-            pendingTransactions.Clear();
-
-            Console.WriteLine("блок змайнено");
+            Console.WriteLine("Блок змайнено");
             break;
 
         case "3":
-            Console.WriteLine("\nблокчейн");
             displayService.DisplayBlockChain(blockchain.Chain);
             break;
 
         case "4":
-            Console.WriteLine("\nвалидация");
-
             if (blockchain.IsValid())
-                Console.WriteLine("валідний +");
+                Console.WriteLine("Blockchain валідний");
             else
-                Console.WriteLine("невалідний -");
+                Console.WriteLine("Blockchain невалідний");
 
             break;
 
         case "5":
-            Console.WriteLine("\nбаланс");
-
-            Console.WriteLine($"Alice: {blockchain.GetBalance(walletAlice.PublicKey)}");
-            Console.WriteLine($"Bob: {blockchain.GetBalance(walletBob.PublicKey)}");
+            Console.WriteLine($"Alice balance: {blockchain.GetBalance(walletAlice.PublicKey)}");
+            Console.WriteLine($"Bob balance: {blockchain.GetBalance(walletBob.PublicKey)}");
             Console.WriteLine($"Total Supply: {blockchain.GetTotalSupply()}");
-
             break;
 
         case "6":
-            Console.WriteLine("\nпадіння");
             blockchain.ClearState();
-            Console.WriteLine("баланс скинутий");
+            Console.WriteLine("State очищено");
             break;
 
         case "7":
-            Console.WriteLine("\nвідновлення стану");
             blockchain.RebuildState();
-            Console.WriteLine("стан відновлено");
+            Console.WriteLine("State відновлено з блоків");
+            break;
+
+        case "8":
+            blockchain.SaveStateSnapshot();
+            Console.WriteLine("Snapshot збережено");
+            break;
+
+        case "9":
+            blockchain.LoadStateSnapshot();
+            Console.WriteLine("Snapshot завантажено");
+            break;
+
+        case "10":
+            Console.WriteLine("\nСтворення 10000 транзакцій...");
+
+            for (int i = 0; i < 10000; i++)
+            {
+                var tx = TransactionService.CreateTransaction(
+                    walletAlice.PublicKey,
+                    walletBob.PublicKey,
+                    1,
+                    walletAlice.PrivateKey
+                );
+
+                blockchain.AddTransaction(tx);
+                blockchain.MineBlock(walletAlice.PublicKey);
+            }
+
+            Console.WriteLine("Benchmark started...");
+
+            var oldWatch = Stopwatch.StartNew();
+
+            decimal oldBalance = 0;
+
+            foreach (var block in blockchain.Chain)
+            {
+                if (block.Transactions == null)
+                    continue;
+
+                foreach (var tx in block.Transactions)
+                {
+                    if (tx.To == walletBob.PublicKey)
+                        oldBalance += tx.Amount;
+
+                    if (tx.From == walletBob.PublicKey)
+                        oldBalance -= tx.Amount;
+                }
+            }
+
+            oldWatch.Stop();
+
+            var newWatch = Stopwatch.StartNew();
+
+            decimal newBalance = blockchain.GetBalance(walletBob.PublicKey);
+
+            newWatch.Stop();
+
+            Console.WriteLine($"Old method balance: {oldBalance}");
+            Console.WriteLine($"Old method time: {oldWatch.ElapsedMilliseconds} ms");
+
+            Console.WriteLine($"New method balance: {newBalance}");
+            Console.WriteLine($"New method time: {newWatch.ElapsedMilliseconds} ms");
+
             break;
 
         case "0":
             return;
 
         default:
-            Console.WriteLine("невірний вибір");
+            Console.WriteLine("Невірний вибір");
             break;
     }
 }

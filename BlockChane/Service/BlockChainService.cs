@@ -2,6 +2,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
+using System.IO;
 
 namespace BlockChane.Service
 {
@@ -14,6 +16,7 @@ namespace BlockChane.Service
         private readonly MiningService _miningService;
 
         private Dictionary<string, decimal> balances = new Dictionary<string, decimal>();
+        public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
 
         private decimal MiningReward = 50m;
         private int HalvingInterval = 5;
@@ -39,7 +42,7 @@ namespace BlockChane.Service
             return genesis;
         }
 
-        public void MineBlock(string minerAddress, List<Transaction> transactions)
+        public void MineBlock(string minerAddress)
         {
             if (Chain.Count % HalvingInterval == 0 && Chain.Count != 0)
             {
@@ -47,7 +50,10 @@ namespace BlockChane.Service
                 Console.WriteLine($"HALVING! New reward: {MiningReward}");
             }
 
+            var transactions = new List<Transaction>(PendingTransactions);
+
             var rewardTransaction = new Transaction("COINBASE", minerAddress, MiningReward);
+
             transactions.Add(rewardTransaction);
 
             var lastBlock = Chain[^1];
@@ -73,6 +79,9 @@ namespace BlockChane.Service
             _miningService.MineBlock(newBlock, Difficulty);
 
             Chain.Add(newBlock);
+
+            PendingTransactions.Clear();
+
             RebuildState();
 
             Console.WriteLine($"Block mined with nonce: {newBlock.Nonce}, hash: {newBlock.Hash}");
@@ -149,10 +158,33 @@ namespace BlockChane.Service
 
         public decimal GetBalance(string address)
         {
-            if (!balances.ContainsKey(address))
-                return 0;
+            decimal balance = 0;
 
-            return balances[address];
+            foreach (var block in Chain)
+            {
+                if (block.Transactions == null)
+                    continue;
+
+                foreach (var tx in block.Transactions)
+                {
+                    if (tx.From == address)
+                        balance -= tx.Amount;
+
+                    if (tx.To == address)
+                        balance += tx.Amount;
+                }
+            }
+
+            foreach (var tx in PendingTransactions)
+            {
+                if (tx.From == address)
+                    balance -= tx.Amount;
+
+                if (tx.To == address)
+                    balance += tx.Amount;
+            }
+
+            return balance;
         }
 
         public void RebuildState()
@@ -185,6 +217,76 @@ namespace BlockChane.Service
         public void ClearState()
         {
             balances.Clear();
+        }
+
+        public bool AddTransaction(Transaction tx)
+        {
+            var validation = TransactionService.ValidateTransaction(tx);
+
+            if (!validation.isValid)
+                throw new Exception(validation.error);
+
+            if (tx.From != "COINBASE")
+            {
+                var balance = GetBalance(tx.From);
+
+                if (balance < tx.Amount)
+                    throw new Exception("Not enough balance");
+            }
+
+            PendingTransactions.Add(tx);
+
+            Console.WriteLine("Transaction added to mempool");
+
+            return true;
+        }
+
+        private void UpdateBalancesState(Block block)
+        {
+            if (block.Transactions == null)
+                return;
+
+            foreach (var tx in block.Transactions)
+            {
+                if (tx.From != "COINBASE")
+                {
+                    if (!balances.ContainsKey(tx.From))
+                        balances[tx.From] = 0;
+
+                    balances[tx.From] -= tx.Amount;
+                }
+
+                if (!balances.ContainsKey(tx.To))
+                    balances[tx.To] = 0;
+
+                balances[tx.To] += tx.Amount;
+            }
+        }
+
+        public void SaveStateSnapshot()
+        {
+            var json = JsonSerializer.Serialize(balances);
+
+            File.WriteAllText("state.json", json);
+
+            Console.WriteLine("State snapshot saved.");
+        }
+
+        public void LoadStateSnapshot()
+        {
+            if (File.Exists("state.json"))
+            {
+                var json = File.ReadAllText("state.json");
+
+                balances = JsonSerializer.Deserialize<Dictionary<string, decimal>>(json);
+
+                Console.WriteLine("State snapshot loaded.");
+            }
+            else
+            {
+                Console.WriteLine("Snapshot not found. Rebuilding state...");
+                RebuildState();
+            }
         }
     }
 }
