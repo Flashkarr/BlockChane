@@ -14,8 +14,10 @@ namespace BlockChane.Service
 
         private readonly HashingService _hashingService;
         private readonly MiningService _miningService;
+        private readonly StorageService _storageService;
 
         private Dictionary<string, decimal> balances = new Dictionary<string, decimal>();
+
         public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
 
         private decimal MiningReward = 50m;
@@ -28,8 +30,20 @@ namespace BlockChane.Service
         {
             _hashingService = new HashingService();
             _miningService = new MiningService(_hashingService);
+            _storageService = new StorageService();
 
-            Chain.Add(CreateGenesisBlock());
+            var loadedChain = _storageService.LoadBlockchain();
+
+            if (loadedChain != null && loadedChain.Count > 0)
+            {
+                Chain = loadedChain;
+                ValidateAndRebuildState();
+            }
+            else
+            {
+                Chain.Add(CreateGenesisBlock());
+                _storageService.SaveBlockchain(Chain);
+            }
         }
 
         private Block CreateGenesisBlock()
@@ -42,8 +56,40 @@ namespace BlockChane.Service
             return genesis;
         }
 
+        public bool AddTransaction(Transaction tx)
+        {
+            var validation = TransactionService.ValidateTransaction(tx);
+
+            if (!validation.isValid)
+                throw new Exception(validation.error);
+
+            if (tx.From != "COINBASE" && tx.From != "System")
+            {
+                int senderPendingCount = PendingTransactions.Count(t => t.From == tx.From);
+
+                if (senderPendingCount >= 3)
+                    throw new InvalidOperationException("Spam detected.");
+
+                decimal balance = GetBalance(tx.From);
+
+                if (balance < tx.Amount)
+                    throw new Exception("Not enough balance");
+            }
+
+            PendingTransactions.Add(tx);
+
+            Console.WriteLine("Transaction added to mempool");
+
+            return true;
+        }
+
         public void MineBlock(string minerAddress)
         {
+            int removed = EvictStaleTransactions(60);
+
+            if (removed > 0)
+                Console.WriteLine($"Removed stale transactions: {removed}");
+
             if (Chain.Count % HalvingInterval == 0 && Chain.Count != 0)
             {
                 MiningReward /= 2;
@@ -53,7 +99,6 @@ namespace BlockChane.Service
             var transactions = new List<Transaction>(PendingTransactions);
 
             var rewardTransaction = new Transaction("COINBASE", minerAddress, MiningReward);
-
             transactions.Add(rewardTransaction);
 
             var lastBlock = Chain[^1];
@@ -82,7 +127,14 @@ namespace BlockChane.Service
 
             PendingTransactions.Clear();
 
-            RebuildState();
+            if (!ValidateAndRebuildState())
+            {
+                Chain.Remove(newBlock);
+                Console.WriteLine("Invalid state after mining. Block rejected.");
+                return;
+            }
+
+            _storageService.SaveBlockchain(Chain);
 
             Console.WriteLine($"Block mined with nonce: {newBlock.Nonce}, hash: {newBlock.Hash}");
 
@@ -90,6 +142,52 @@ namespace BlockChane.Service
             {
                 AdjustDifficulty();
             }
+        }
+
+        public int EvictStaleTransactions(int maxAgeSeconds)
+        {
+            int before = PendingTransactions.Count;
+
+            PendingTransactions.RemoveAll(tx =>
+                (DateTime.UtcNow - tx.TimeStamp).TotalSeconds > maxAgeSeconds
+            );
+
+            return before - PendingTransactions.Count;
+        }
+
+        public bool ValidateAndRebuildState()
+        {
+            balances.Clear();
+
+            foreach (var block in Chain)
+            {
+                if (block.Transactions == null)
+                    continue;
+
+                foreach (var tx in block.Transactions)
+                {
+                    if (tx.From != "COINBASE" && tx.From != "System")
+                    {
+                        if (!balances.ContainsKey(tx.From))
+                            balances[tx.From] = 0;
+
+                        balances[tx.From] -= tx.Amount;
+
+                        if (balances[tx.From] < 0)
+                        {
+                            balances.Clear();
+                            return false;
+                        }
+                    }
+
+                    if (!balances.ContainsKey(tx.To))
+                        balances[tx.To] = 0;
+
+                    balances[tx.To] += tx.Amount;
+                }
+            }
+
+            return true;
         }
 
         private void AdjustDifficulty()
@@ -144,7 +242,8 @@ namespace BlockChane.Service
 
             foreach (var block in Chain)
             {
-                if (block.Transactions == null) continue;
+                if (block.Transactions == null)
+                    continue;
 
                 foreach (var tx in block.Transactions)
                 {
@@ -158,22 +257,15 @@ namespace BlockChane.Service
 
         public decimal GetBalance(string address)
         {
-            decimal balance = 0;
+            if (balances.ContainsKey(address))
+                return balances[address];
 
-            foreach (var block in Chain)
-            {
-                if (block.Transactions == null)
-                    continue;
+            return 0;
+        }
 
-                foreach (var tx in block.Transactions)
-                {
-                    if (tx.From == address)
-                        balance -= tx.Amount;
-
-                    if (tx.To == address)
-                        balance += tx.Amount;
-                }
-            }
+        public decimal GetBalanceWithPending(string address)
+        {
+            decimal balance = GetBalance(address);
 
             foreach (var tx in PendingTransactions)
             {
@@ -189,29 +281,7 @@ namespace BlockChane.Service
 
         public void RebuildState()
         {
-            balances.Clear();
-
-            foreach (var block in Chain)
-            {
-                if (block.Transactions == null)
-                    continue;
-
-                foreach (var tx in block.Transactions)
-                {
-                    if (tx.From != "COINBASE")
-                    {
-                        if (!balances.ContainsKey(tx.From))
-                            balances[tx.From] = 0;
-
-                        balances[tx.From] -= tx.Amount;
-                    }
-
-                    if (!balances.ContainsKey(tx.To))
-                        balances[tx.To] = 0;
-
-                    balances[tx.To] += tx.Amount;
-                }
-            }
+            ValidateAndRebuildState();
         }
 
         public void ClearState()
@@ -219,53 +289,12 @@ namespace BlockChane.Service
             balances.Clear();
         }
 
-        public bool AddTransaction(Transaction tx)
-        {
-            var validation = TransactionService.ValidateTransaction(tx);
-
-            if (!validation.isValid)
-                throw new Exception(validation.error);
-
-            if (tx.From != "COINBASE")
-            {
-                var balance = GetBalance(tx.From);
-
-                if (balance < tx.Amount)
-                    throw new Exception("Not enough balance");
-            }
-
-            PendingTransactions.Add(tx);
-
-            Console.WriteLine("Transaction added to mempool");
-
-            return true;
-        }
-
-        private void UpdateBalancesState(Block block)
-        {
-            if (block.Transactions == null)
-                return;
-
-            foreach (var tx in block.Transactions)
-            {
-                if (tx.From != "COINBASE")
-                {
-                    if (!balances.ContainsKey(tx.From))
-                        balances[tx.From] = 0;
-
-                    balances[tx.From] -= tx.Amount;
-                }
-
-                if (!balances.ContainsKey(tx.To))
-                    balances[tx.To] = 0;
-
-                balances[tx.To] += tx.Amount;
-            }
-        }
-
         public void SaveStateSnapshot()
         {
-            var json = JsonSerializer.Serialize(balances);
+            var json = JsonSerializer.Serialize(balances, new JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
 
             File.WriteAllText("state.json", json);
 
@@ -278,14 +307,15 @@ namespace BlockChane.Service
             {
                 var json = File.ReadAllText("state.json");
 
-                balances = JsonSerializer.Deserialize<Dictionary<string, decimal>>(json);
+                balances = JsonSerializer.Deserialize<Dictionary<string, decimal>>(json)
+                           ?? new Dictionary<string, decimal>();
 
                 Console.WriteLine("State snapshot loaded.");
             }
             else
             {
                 Console.WriteLine("Snapshot not found. Rebuilding state...");
-                RebuildState();
+                ValidateAndRebuildState();
             }
         }
     }

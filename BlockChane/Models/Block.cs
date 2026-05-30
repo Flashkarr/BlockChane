@@ -1,10 +1,12 @@
 ﻿using System;
+using System.Collections.Generic;
 
 namespace BlockChane.Models
 {
     public class Block
     {
         public int Index { get; set; }
+
         public DateTime Timestamp { get; set; }
 
         public string Data { get; set; }
@@ -20,9 +22,21 @@ namespace BlockChane.Models
         public long MiningTimeMs { get; set; }
 
         public double MiningDurationSeconds { get; set; } = 0;
-        public List<Transaction> Transactions { get; set; }
+
+        public List<Transaction> Transactions { get; set; } = new List<Transaction>();
+
         public decimal TotalSupply { get; set; } = 0;
+
         public int DifficultyAtMining { get; set; }
+
+        public Block()
+        {
+            Data = "";
+            Author = "";
+            Hash = "";
+            PrevHash = "";
+            Transactions = new List<Transaction>();
+        }
 
         public Block(int index, string data, string author, string prevHash, DateTime timestamp)
         {
@@ -33,6 +47,7 @@ namespace BlockChane.Models
             PrevHash = prevHash;
             Hash = "";
             Nonce = 0;
+            Transactions = new List<Transaction>();
         }
 
         public decimal GetTotalSupply()

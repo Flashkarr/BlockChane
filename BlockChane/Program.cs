@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using BlockChane.Models;
 using BlockChane.Service;
+using BlockChane.Service.P2P;
 
 Console.OutputEncoding = Encoding.UTF8;
 
@@ -12,6 +13,14 @@ var crypto = new CryptoService();
 
 var walletAlice = new Wallet(crypto);
 var walletBob = new Wallet(crypto);
+
+var p2pClient = new P2PClient();
+var p2pServer = new P2PServer(blockchain);
+
+Console.Write("Введіть порт цієї ноди: ");
+int port = int.Parse(Console.ReadLine() ?? "5001");
+
+p2pServer.Start(port);
 
 while (true)
 {
@@ -26,6 +35,12 @@ while (true)
     Console.WriteLine("8 - SaveStateSnapshot");
     Console.WriteLine("9 - LoadStateSnapshot");
     Console.WriteLine("10 - Benchmark");
+    Console.WriteLine("11 - Підключитися до іншої ноди");
+    Console.WriteLine("12 - Показати Mempool");
+    Console.WriteLine("13 - Simulate new chain");
+    Console.WriteLine("14 - Test RebuildState");
+    Console.WriteLine("15 - Test TTL");
+    Console.WriteLine("16 - Test AntiSpam");
     Console.WriteLine("0 - Вихід");
 
     Console.Write("Вибір: ");
@@ -64,8 +79,9 @@ while (true)
                 );
 
                 blockchain.AddTransaction(tx);
+                p2pClient.BroadcastTransactionAsync(tx).Wait();
 
-                Console.WriteLine("Транзакцію додано в Mempool");
+                Console.WriteLine("Транзакцію додано в Mempool і відправлено пірам");
             }
             catch (Exception ex)
             {
@@ -175,6 +191,104 @@ while (true)
 
             Console.WriteLine($"New method balance: {newBalance}");
             Console.WriteLine($"New method time: {newWatch.ElapsedMilliseconds} ms");
+
+            break;
+
+        case "11":
+            Console.Write("Введіть адресу ноди, наприклад 127.0.0.1:5002: ");
+            var peer = Console.ReadLine();
+
+            if (!string.IsNullOrWhiteSpace(peer))
+                p2pClient.Connect(peer);
+
+            break;
+
+        case "12":
+            Console.WriteLine("\nMempool:");
+
+            foreach (var tx in blockchain.PendingTransactions)
+            {
+                Console.WriteLine($"{tx.Id} | From: {tx.From} | To: {tx.To} | Amount: {tx.Amount}");
+            }
+
+            break;
+
+        case "13":
+            Console.WriteLine("Simulating new chain with one additional block...");
+
+            blockchain.MineBlock(walletAlice.PublicKey);
+            blockchain.MineBlock(walletBob.PublicKey);
+            blockchain.MineBlock(walletBob.PublicKey);
+
+            displayService.DisplayBlockChain(blockchain.Chain);
+            break;
+
+        case "14":
+            Console.WriteLine("\n=== TEST RebuildState ===");
+
+            blockchain.MineBlock(walletAlice.PublicKey);
+
+            Console.WriteLine($"Alice before clear: {blockchain.GetBalance(walletAlice.PublicKey)}");
+
+            blockchain.ClearState();
+
+            Console.WriteLine($"Alice after clear: {blockchain.GetBalance(walletAlice.PublicKey)}");
+
+            bool rebuildResult = blockchain.ValidateAndRebuildState();
+
+            Console.WriteLine($"ValidateAndRebuildState result: {rebuildResult}");
+            Console.WriteLine($"Alice after rebuild: {blockchain.GetBalance(walletAlice.PublicKey)}");
+
+            break;
+
+        case "15":
+            Console.WriteLine("\n=== TEST TTL ===");
+
+            var staleTx = TransactionService.CreateTransaction(
+                walletAlice.PublicKey,
+                walletBob.PublicKey,
+                1,
+                walletAlice.PrivateKey
+            );
+
+            staleTx.TimeStamp = DateTime.UtcNow.AddSeconds(-120);
+
+            blockchain.PendingTransactions.Add(staleTx);
+
+            Console.WriteLine($"Mempool before TTL: {blockchain.PendingTransactions.Count}");
+
+            int removed = blockchain.EvictStaleTransactions(60);
+
+            Console.WriteLine($"Removed stale transactions: {removed}");
+            Console.WriteLine($"Mempool after TTL: {blockchain.PendingTransactions.Count}");
+
+            break;
+
+        case "16":
+            Console.WriteLine("\n=== TEST AntiSpam ===");
+
+            try
+            {
+                blockchain.MineBlock(walletAlice.PublicKey);
+
+                for (int i = 1; i <= 4; i++)
+                {
+                    var spamTx = TransactionService.CreateTransaction(
+                        walletAlice.PublicKey,
+                        walletBob.PublicKey,
+                        1,
+                        walletAlice.PrivateKey
+                    );
+
+                    blockchain.AddTransaction(spamTx);
+
+                    Console.WriteLine($"Transaction {i} added");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"AntiSpam worked: {ex.Message}");
+            }
 
             break;
 
