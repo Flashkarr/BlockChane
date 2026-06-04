@@ -15,8 +15,8 @@ var walletAlice = new Wallet(crypto);
 var walletBob = new Wallet(crypto);
 
 var p2pClient = new P2PClient();
-var p2pServer = new P2PServer(blockchain);
-
+var p2pServer = new P2PServer(blockchain, p2pClient);
+const int TTL_SECONDS = 60;
 Console.Write("Введіть порт цієї ноди: ");
 int port = int.Parse(Console.ReadLine() ?? "5001");
 
@@ -41,6 +41,8 @@ while (true)
     Console.WriteLine("14 - Test RebuildState");
     Console.WriteLine("15 - Test TTL");
     Console.WriteLine("16 - Test AntiSpam");
+    Console.WriteLine("17 - Test VIP Priority");
+    Console.WriteLine("18 - Test LockTime");
     Console.WriteLine("0 - Вихід");
 
     Console.Write("Вибір: ");
@@ -289,6 +291,81 @@ while (true)
             {
                 Console.WriteLine($"AntiSpam worked: {ex.Message}");
             }
+
+            break;
+
+        case "17":
+            Console.WriteLine("\n=== TEST VIP PRIORITY ===");
+
+            blockchain.PendingTransactions.Clear();
+
+            var txSmall = TransactionService.CreateTransaction(
+                walletAlice.PublicKey,
+                walletBob.PublicKey,
+                10,
+                walletAlice.PrivateKey
+            );
+
+            Thread.Sleep(1000);
+
+            var txBig = TransactionService.CreateTransaction(
+                walletAlice.PublicKey,
+                walletBob.PublicKey,
+                100,
+                walletAlice.PrivateKey
+            );
+
+            blockchain.AddTransaction(txSmall);
+            blockchain.AddTransaction(txBig);
+
+            Console.WriteLine("Mempool before mining:");
+
+            foreach (var tx in blockchain.PendingTransactions)
+            {
+                Console.WriteLine($"Amount = {tx.Amount}");
+            }
+
+            blockchain.MineBlock(walletAlice.PublicKey);
+
+            var lastBlock = blockchain.Chain.Last();
+
+            Console.WriteLine("\nTransactions inside mined block:");
+
+            foreach (var tx in lastBlock.Transactions
+                     .Where(t => t.From != "COINBASE"))
+            {
+                Console.WriteLine($"Amount = {tx.Amount}");
+            }
+
+            break;
+
+        case "18":
+            Console.WriteLine("\n=== TEST LOCKTIME ===");
+
+            blockchain.PendingTransactions.Clear();
+
+            var lockedTx = TransactionService.CreateTransaction(
+                walletAlice.PublicKey,
+                walletBob.PublicKey,
+                50,
+                walletAlice.PrivateKey
+            );
+
+            lockedTx.LockTime = blockchain.Chain.Count + 5;
+
+            blockchain.AddTransaction(lockedTx);
+
+            Console.WriteLine($"Current chain height: {blockchain.Chain.Count}");
+            Console.WriteLine($"Transaction LockTime: {lockedTx.LockTime}");
+
+            Console.WriteLine($"Mempool before mining: {blockchain.PendingTransactions.Count}");
+
+            blockchain.MineBlock(walletAlice.PublicKey);
+
+            Console.WriteLine($"Mempool after mining: {blockchain.PendingTransactions.Count}");
+
+            if (blockchain.PendingTransactions.Count > 0)
+                Console.WriteLine("LockTime works: transaction stayed in mempool");
 
             break;
 

@@ -24,7 +24,7 @@ namespace BlockChane.Models
         public double MiningDurationSeconds { get; set; } = 0;
 
         public List<Transaction> Transactions { get; set; } = new List<Transaction>();
-
+        public string MerkleRoot { get; set; } = "";
         public decimal TotalSupply { get; set; } = 0;
 
         public int DifficultyAtMining { get; set; }

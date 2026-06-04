@@ -17,7 +17,7 @@ namespace BlockChane.Service
             var target = new string('0', difficulty);
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            int maxAttempts = 10_000_000;
+            int maxAttempts = 500_000;
 
             while (block.Nonce < maxAttempts)
             {
@@ -36,6 +36,7 @@ namespace BlockChane.Service
                     block.MiningTimeMs = stopwatch.ElapsedMilliseconds;
                     block.MiningDurationSeconds = stopwatch.Elapsed.TotalSeconds;
 
+                    Console.WriteLine();
                     return block.Nonce;
                 }
             }
@@ -45,7 +46,7 @@ namespace BlockChane.Service
             block.MiningTimeMs = stopwatch.ElapsedMilliseconds;
             block.MiningDurationSeconds = stopwatch.Elapsed.TotalSeconds;
 
-            Console.WriteLine("Mining failed: too hard");
+            Console.WriteLine("\nMining failed: too hard");
             return block.Nonce;
         }
     }

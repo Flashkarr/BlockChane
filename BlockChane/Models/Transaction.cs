@@ -19,6 +19,7 @@ namespace BlockChane.Models
 
         public DateTime TimeStamp { get; set; } = DateTime.UtcNow;
 
+        public int LockTime { get; set; } = 0;
         public Transaction(string from, string to, decimal amount)
         {
             From = from;

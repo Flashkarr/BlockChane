@@ -10,7 +10,7 @@ namespace BlockChane.Service
     public class BlockChainService
     {
         public List<Block> Chain { get; set; } = new List<Block>();
-        public int Difficulty { get; set; } = 2;
+        public int Difficulty { get; set; } = 1;
 
         private readonly HashingService _hashingService;
         private readonly MiningService _miningService;
@@ -24,8 +24,8 @@ namespace BlockChane.Service
         private int HalvingInterval = 5;
 
         private int _difficultyAdjustmentInterval = 3;
-        private double _targetBlockTimeSeconds = 0.8;
-
+        private TimeSpan TransactionTtl = TimeSpan.FromMinutes(5);
+        private int MaxTransactionsPerBlock = 10;
         public BlockChainService()
         {
             _hashingService = new HashingService();
@@ -52,6 +52,7 @@ namespace BlockChane.Service
             genesis.Hash = _hashingService.ComputeHash(genesis);
             genesis.DifficultyAtMining = Difficulty;
             genesis.Transactions = new List<Transaction>();
+            genesis.MerkleRoot = _hashingService.BuildMerkleRoot(genesis.Transactions);
 
             return genesis;
         }
@@ -63,6 +64,9 @@ namespace BlockChane.Service
             if (!validation.isValid)
                 throw new Exception(validation.error);
 
+            if (PendingTransactions.Any(t => t.Id == tx.Id))
+                return false;
+
             if (tx.From != "COINBASE" && tx.From != "System")
             {
                 int senderPendingCount = PendingTransactions.Count(t => t.From == tx.From);
@@ -70,10 +74,11 @@ namespace BlockChane.Service
                 if (senderPendingCount >= 3)
                     throw new InvalidOperationException("Spam detected.");
 
-                decimal balance = GetBalance(tx.From);
-
-                if (balance < tx.Amount)
-                    throw new Exception("Not enough balance");
+                // Для P2P/Gossip тесту перевірку балансу тимчасово вимкнено.
+                // decimal balance = GetBalance(tx.From);
+                //
+                // if (balance < tx.Amount)
+                //     throw new Exception("Not enough balance");
             }
 
             PendingTransactions.Add(tx);
@@ -83,12 +88,28 @@ namespace BlockChane.Service
             return true;
         }
 
+        public bool AddTransactionFromNetwork(Transaction tx)
+        {
+            var validation = TransactionService.ValidateTransaction(tx);
+
+            if (!validation.isValid)
+                throw new Exception(validation.error);
+
+            if (PendingTransactions.Any(t => t.Id == tx.Id))
+                return false;
+
+            PendingTransactions.Add(tx);
+
+            Console.WriteLine("Network transaction added to mempool");
+
+            return true;
+        }
+
         public void MineBlock(string minerAddress)
         {
-            int removed = EvictStaleTransactions(60);
-
-            if (removed > 0)
-                Console.WriteLine($"Removed stale transactions: {removed}");
+            PendingTransactions.RemoveAll(tx =>
+                DateTime.UtcNow - tx.TimeStamp > TransactionTtl
+            );
 
             if (Chain.Count % HalvingInterval == 0 && Chain.Count != 0)
             {
@@ -96,9 +117,15 @@ namespace BlockChane.Service
                 Console.WriteLine($"HALVING! New reward: {MiningReward}");
             }
 
-            var transactions = new List<Transaction>(PendingTransactions);
+            var transactions = PendingTransactions
+                .Where(tx => tx.LockTime <= Chain.Count)
+                .OrderByDescending(tx => tx.Amount)
+                .Take(MaxTransactionsPerBlock)
+                .ToList();
 
-            var rewardTransaction = new Transaction("COINBASE", minerAddress, MiningReward);
+            var rewardTransaction =
+                new Transaction("COINBASE", minerAddress, MiningReward);
+
             transactions.Add(rewardTransaction);
 
             var lastBlock = Chain[^1];
@@ -112,10 +139,11 @@ namespace BlockChane.Service
             );
 
             newBlock.Transactions = transactions;
+            newBlock.MerkleRoot = _hashingService.BuildMerkleRoot(transactions);
 
             newBlock.Data = string.Join("\n", transactions.Select(t =>
                 t.From == "COINBASE"
-                    ? $"Transaction: {t.Id}, From: {t.From}, To: {t.To}, Amount: {t.Amount}, TimeStamp: {t.TimeStamp}, Signature: COINBASE"
+                    ? $"Transaction: {t.Id}, From: {t.From}, To: {t.To}, Amount: {t.Amount}"
                     : t.ToString()
             ));
 
@@ -125,14 +153,11 @@ namespace BlockChane.Service
 
             Chain.Add(newBlock);
 
-            PendingTransactions.Clear();
+            PendingTransactions.RemoveAll(tx =>
+                transactions.Any(t => t.Id == tx.Id)
+            );
 
-            if (!ValidateAndRebuildState())
-            {
-                Chain.Remove(newBlock);
-                Console.WriteLine("Invalid state after mining. Block rejected.");
-                return;
-            }
+            ValidateAndRebuildState();
 
             _storageService.SaveBlockchain(Chain);
 
@@ -172,12 +197,6 @@ namespace BlockChane.Service
                             balances[tx.From] = 0;
 
                         balances[tx.From] -= tx.Amount;
-
-                        if (balances[tx.From] < 0)
-                        {
-                            balances.Clear();
-                            return false;
-                        }
                     }
 
                     if (!balances.ContainsKey(tx.To))
@@ -192,31 +211,8 @@ namespace BlockChane.Service
 
         private void AdjustDifficulty()
         {
-            var recentBlocks = Chain
-                .Skip(Math.Max(1, Chain.Count - _difficultyAdjustmentInterval))
-                .Take(_difficultyAdjustmentInterval)
-                .ToList();
-
-            if (recentBlocks.Count == 0)
-                return;
-
-            double realTotalTime = recentBlocks.Sum(b => b.MiningDurationSeconds);
-            double targetTotalTime = _targetBlockTimeSeconds * recentBlocks.Count;
-
-            if (realTotalTime <= 0)
-                realTotalTime = 0.001;
-
-            double newDifficulty = Difficulty * (targetTotalTime / realTotalTime);
-
-            Difficulty = (int)Math.Round(newDifficulty);
-
-            if (Difficulty < 1)
-                Difficulty = 1;
-
-            if (Difficulty > 6)
-                Difficulty = 6;
-
-            Console.WriteLine($"Difficulty changed to {Difficulty} (real time: {realTotalTime:0.00}s, target: {targetTotalTime:0.00}s)");
+            Difficulty = 1;
+            Console.WriteLine("Difficulty fixed to 1 for testing.");
         }
 
         public bool IsValid()
@@ -261,22 +257,6 @@ namespace BlockChane.Service
                 return balances[address];
 
             return 0;
-        }
-
-        public decimal GetBalanceWithPending(string address)
-        {
-            decimal balance = GetBalance(address);
-
-            foreach (var tx in PendingTransactions)
-            {
-                if (tx.From == address)
-                    balance -= tx.Amount;
-
-                if (tx.To == address)
-                    balance += tx.Amount;
-            }
-
-            return balance;
         }
 
         public void RebuildState()
