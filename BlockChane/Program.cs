@@ -102,6 +102,10 @@ while (true)
 
             blockchain.MineBlock(miner.PublicKey);
 
+            await p2pClient.BroadcastBlockAsync(
+            blockchain.Chain.Last()
+            );
+
             Console.WriteLine("Блок змайнено");
             break;
 

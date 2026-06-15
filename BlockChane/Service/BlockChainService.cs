@@ -298,5 +298,10 @@ namespace BlockChane.Service
                 ValidateAndRebuildState();
             }
         }
+
+        public bool MerkleRootExists(string root)
+        {
+            return Chain.Any(b => b.MerkleRoot == root);
+        }
     }
 }
