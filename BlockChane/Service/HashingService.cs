@@ -46,12 +46,15 @@ namespace BlockChane.Service
                 {
                     if (i + 1 < hashes.Count)
                     {
-                        string combinedHash = hashes[i] + hashes[i + 1];
-                        newHashes.Add(ComputeHash(combinedHash));
+                        newHashes.Add(
+                            ComputeHash(hashes[i] + hashes[i + 1])
+                        );
                     }
                     else
                     {
-                        newHashes.Add(hashes[i]);
+                        newHashes.Add(
+                            ComputeHash(hashes[i] + hashes[i])
+                        );
                     }
                 }
 
@@ -59,6 +62,60 @@ namespace BlockChane.Service
             }
 
             return hashes[0];
+        }
+
+        public List<string> GetMerkleProof(List<Transaction> transactions, string targetTxId)
+        {
+            var hashes = transactions
+                .Select(tx => ComputeHash(tx.ToRawString()))
+                .ToList();
+
+            int index = transactions.FindIndex(tx => tx.Id == targetTxId);
+
+            if (index == -1)
+                return new List<string>();
+
+            List<string> proof = new();
+
+            while (hashes.Count > 1)
+            {
+                if (index % 2 == 0)
+                {
+                    if (index + 1 < hashes.Count)
+                        proof.Add(hashes[index + 1]);
+                }
+                else
+                {
+                    proof.Add(hashes[index - 1]);
+                }
+
+                List<string> newHashes = new();
+
+                for (int i = 0; i < hashes.Count; i += 2)
+                {
+                    if (i + 1 < hashes.Count)
+                        newHashes.Add(ComputeHash(hashes[i] + hashes[i + 1]));
+                    else
+                        newHashes.Add(hashes[i]);
+                }
+
+                index /= 2;
+                hashes = newHashes;
+            }
+
+            return proof;
+        }
+
+        public bool VerifyMerkleProof(string txHash, List<string> proof, string expectedMerkleRoot)
+        {
+            string currentHash = txHash;
+
+            foreach (var siblingHash in proof)
+            {
+                currentHash = ComputeHash(currentHash + siblingHash);
+            }
+
+            return currentHash == expectedMerkleRoot;
         }
     }
 }

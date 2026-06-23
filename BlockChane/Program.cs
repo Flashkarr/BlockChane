@@ -15,6 +15,7 @@ var walletAlice = new Wallet(crypto);
 var walletBob = new Wallet(crypto);
 
 var p2pClient = new P2PClient();
+await p2pClient.ReconnectSavedPeers();
 var p2pServer = new P2PServer(blockchain, p2pClient);
 const int TTL_SECONDS = 60;
 Console.Write("Введіть порт цієї ноди: ");
@@ -43,6 +44,7 @@ while (true)
     Console.WriteLine("16 - Test AntiSpam");
     Console.WriteLine("17 - Test VIP Priority");
     Console.WriteLine("18 - Test LockTime");
+    Console.WriteLine("19 - SPV перевірка");
     Console.WriteLine("0 - Вихід");
 
     Console.Write("Вибір: ");
@@ -372,6 +374,46 @@ while (true)
                 Console.WriteLine("LockTime works: transaction stayed in mempool");
 
             break;
+
+        case "19":
+            {
+                var block = blockchain.Chain.LastOrDefault(b => b.Transactions.Count >= 2);
+
+                if (block == null)
+                {
+                    Console.WriteLine("No block found");
+                    break;
+                }
+
+                var tx = block.Transactions[0];
+
+                Console.WriteLine($"Target transaction ID:\n{tx.Id}");
+
+                var hashing = new HashingService();
+
+                var proof = hashing.GetMerkleProof(block.Transactions, tx.Id);
+
+                Console.WriteLine("\nMerkle Proof Hash Path:");
+
+                foreach (var hash in proof)
+                    Console.WriteLine(hash);
+
+                Console.WriteLine($"\nExpected MerkleRoot:\n{block.MerkleRoot}");
+
+                bool result =
+                    hashing.VerifyMerkleProof(
+                        hashing.ComputeHash(tx.ToRawString()),
+                        proof,
+                        block.MerkleRoot
+                    );
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($"\n[SPV Verification Passed: {result}]");
+                Console.ResetColor();
+
+                break;
+            }
+
 
         case "0":
             return;

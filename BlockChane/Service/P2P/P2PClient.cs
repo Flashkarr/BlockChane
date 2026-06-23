@@ -1,6 +1,7 @@
 ﻿using BlockChane.Models;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.IO;
 
 namespace BlockChane.Service.P2P
 {
@@ -8,11 +9,83 @@ namespace BlockChane.Service.P2P
     {
         private readonly List<string> _peers = new();
 
+        private const string PeersFile = "peers.json";
+
+        public P2PClient()
+        {
+            LoadPeers();
+        }
+
+        private void SavePeers()
+        {
+            File.WriteAllText(
+                PeersFile,
+                JsonSerializer.Serialize(_peers)
+            );
+        }
+
+        private void LoadPeers()
+        {
+            if (!File.Exists(PeersFile))
+                return;
+
+            var peers = JsonSerializer.Deserialize<List<string>>(
+                File.ReadAllText(PeersFile)
+            );
+
+            if (peers != null)
+                _peers.AddRange(peers);
+        }
+
+        public async Task ReconnectSavedPeers()
+        {
+            foreach (var peer in _peers)
+            {
+                try
+                {
+                    var parts = peer.Split(':');
+
+                    await RequestMempoolAsync(
+                        parts[0],
+                        int.Parse(parts[1])
+                    );
+
+                    Console.WriteLine($"Reconnected to {peer}");
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        public async Task ReconnectToKnownPeersAsync()
+        {
+            foreach (var peer in _peers.ToList())
+            {
+                try
+                {
+                    var parts = peer.Split(':');
+
+                    await RequestMempoolAsync(
+                        parts[0],
+                        int.Parse(parts[1]));
+
+                    Console.WriteLine($"Reconnected to {peer}");
+                }
+                catch
+                {
+                    Console.WriteLine($"Peer {peer} offline");
+                }
+            }
+        }
+
         public void Connect(string peerAddress)
         {
             if (!_peers.Contains(peerAddress))
             {
                 _peers.Add(peerAddress);
+
+                SavePeers();
 
                 Console.WriteLine(
                     $"Connected to peer: {peerAddress}"
@@ -20,13 +93,11 @@ namespace BlockChane.Service.P2P
 
                 try
                 {
-                    var parts =
-                        peerAddress.Split(':');
+                    var parts = peerAddress.Split(':');
 
                     _ = RequestMempoolAsync(
                         parts[0],
-                        int.Parse(parts[1])
-                    );
+                        int.Parse(parts[1]));
                 }
                 catch
                 {
@@ -44,14 +115,14 @@ namespace BlockChane.Service.P2P
                 {
                     var parts = peer.Split(':');
 
-                    var ip = parts[0];
-                    var port = int.Parse(parts[1]);
-
                     using var client = new TcpClient();
 
-                    await client.ConnectAsync(ip, port);
+                    await client.ConnectAsync(
+                        parts[0],
+                        int.Parse(parts[1]));
 
                     using var stream = client.GetStream();
+
                     using var writer = new StreamWriter(stream)
                     {
                         AutoFlush = true
@@ -59,9 +130,8 @@ namespace BlockChane.Service.P2P
 
                     await writer.WriteLineAsync(jsonTransaction);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Console.WriteLine($"Error sending transaction: {ex.Message}");
                 }
             }
         }
@@ -82,7 +152,9 @@ namespace BlockChane.Service.P2P
 
                     using var client = new TcpClient();
 
-                    await client.ConnectAsync(parts[0], int.Parse(parts[1]));
+                    await client.ConnectAsync(
+                        parts[0],
+                        int.Parse(parts[1]));
 
                     using var stream = client.GetStream();
 
@@ -115,7 +187,9 @@ namespace BlockChane.Service.P2P
 
                     using var client = new TcpClient();
 
-                    await client.ConnectAsync(parts[0], int.Parse(parts[1]));
+                    await client.ConnectAsync(
+                        parts[0],
+                        int.Parse(parts[1]));
 
                     using var stream = client.GetStream();
 
@@ -155,9 +229,8 @@ namespace BlockChane.Service.P2P
 
                 await writer.WriteLineAsync(message);
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine(ex.Message);
             }
         }
 
@@ -167,8 +240,7 @@ namespace BlockChane.Service.P2P
             {
                 var message = new NetworkMessage(
                     "REQUEST_MEMPOOL",
-                    ""
-                );
+                    "");
 
                 var json =
                     JsonSerializer.Serialize(message);
@@ -187,10 +259,11 @@ namespace BlockChane.Service.P2P
 
                 await writer.WriteLineAsync(json);
             }
-            catch (Exception ex)
+            catch
             {
-                Console.WriteLine(ex.Message);
             }
         }
+
+
     }
 }
