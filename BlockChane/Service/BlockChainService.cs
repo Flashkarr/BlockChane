@@ -16,7 +16,7 @@ namespace BlockChane.Service
         private readonly MiningService _miningService;
         private readonly StorageService _storageService;
 
-        private Dictionary<string, decimal> balances = new Dictionary<string, decimal>();
+        private Dictionary<string, Dictionary<string, decimal>> balances = new();
 
         public List<Transaction> PendingTransactions { get; set; } = new List<Transaction>();
 
@@ -46,6 +46,28 @@ namespace BlockChane.Service
             }
         }
 
+        private void AddBalance(string address, string token, decimal amount)
+        {
+            if (!balances.ContainsKey(address))
+                balances[address] = new Dictionary<string, decimal>();
+
+            if (!balances[address].ContainsKey(token))
+                balances[address][token] = 0;
+
+            balances[address][token] += amount;
+        }
+
+        private void RemoveBalance(string address, string token, decimal amount)
+        {
+            if (!balances.ContainsKey(address))
+                balances[address] = new Dictionary<string, decimal>();
+
+            if (!balances[address].ContainsKey(token))
+                balances[address][token] = 0;
+
+            balances[address][token] -= amount;
+        }
+
         private Block CreateGenesisBlock()
         {
             var genesis = new Block(0, "Genesis Block", "System", "0", DateTime.UtcNow);
@@ -67,18 +89,19 @@ namespace BlockChane.Service
             if (PendingTransactions.Any(t => t.Id == tx.Id))
                 return false;
 
-            if (tx.From != "COINBASE" && tx.From != "System")
+            if (tx.From != "COINBASE" && tx.From != "System" && tx.From != "MINT")
             {
-                int senderPendingCount = PendingTransactions.Count(t => t.From == tx.From);
+                int senderPendingCount =
+                    PendingTransactions.Count(t => t.From == tx.From);
 
                 if (senderPendingCount >= 3)
                     throw new InvalidOperationException("Spam detected.");
 
-                // Для P2P/Gossip тесту перевірку балансу тимчасово вимкнено.
-                // decimal balance = GetBalance(tx.From);
-                //
-                // if (balance < tx.Amount)
-                //     throw new Exception("Not enough balance");
+                if (GetBalance(tx.From, tx.TokenSymbol) < tx.Amount)
+                    throw new Exception("Not enough token balance.");
+
+                if (GetBalance(tx.From, "MAIN") < tx.Fee)
+                    throw new Exception("Not enough MAIN for fee.");
             }
 
             PendingTransactions.Add(tx);
@@ -123,10 +146,20 @@ namespace BlockChane.Service
                 .Take(MaxTransactionsPerBlock)
                 .ToList();
 
-            var rewardTransaction =
-                new Transaction("COINBASE", minerAddress, MiningReward);
+            decimal totalFees = transactions.Sum(t => t.Fee);
+
+            var rewardTransaction = new Transaction(
+                "COINBASE",
+                minerAddress,
+                MiningReward + totalFees
+            )
+            {
+                Fee = 0,
+                TokenSymbol = "MAIN"
+            };
 
             transactions.Add(rewardTransaction);
+
 
             var lastBlock = Chain[^1];
 
@@ -152,6 +185,16 @@ namespace BlockChane.Service
             _miningService.MineBlock(newBlock, Difficulty);
 
             Chain.Add(newBlock);
+
+            foreach (var tx in transactions)
+            {
+                if (tx.From == "MINT")
+                {
+                    Console.WriteLine(
+                        $"Token {tx.TokenSymbol} minted: {tx.Amount}"
+                    );
+                }
+            }
 
             PendingTransactions.RemoveAll(tx =>
                 transactions.Any(t => t.Id == tx.Id)
@@ -186,23 +229,23 @@ namespace BlockChane.Service
 
             foreach (var block in Chain)
             {
-                if (block.Transactions == null)
-                    continue;
-
                 foreach (var tx in block.Transactions)
                 {
-                    if (tx.From != "COINBASE" && tx.From != "System")
+                    if (tx.From == "MINT")
                     {
-                        if (!balances.ContainsKey(tx.From))
-                            balances[tx.From] = 0;
-
-                        balances[tx.From] -= tx.Amount;
+                        AddBalance(tx.To, tx.TokenSymbol, tx.Amount);
+                        continue;
                     }
 
-                    if (!balances.ContainsKey(tx.To))
-                        balances[tx.To] = 0;
+                    if (tx.From != "COINBASE")
+                    {
+                        RemoveBalance(tx.From, tx.TokenSymbol, tx.Amount);
+                        RemoveBalance(tx.From, "MAIN", tx.Fee);
 
-                    balances[tx.To] += tx.Amount;
+                        AddBalance(block.Author, "MAIN", tx.Fee);
+                    }
+
+                    AddBalance(tx.To, tx.TokenSymbol, tx.Amount);
                 }
             }
 
@@ -251,12 +294,15 @@ namespace BlockChane.Service
             return total;
         }
 
-        public decimal GetBalance(string address)
+        public decimal GetBalance(string address, string token = "MAIN")
         {
-            if (balances.ContainsKey(address))
-                return balances[address];
+            if (!balances.ContainsKey(address))
+                return 0;
 
-            return 0;
+            if (!balances[address].ContainsKey(token))
+                return 0;
+
+            return balances[address][token];
         }
 
         public void RebuildState()
@@ -287,8 +333,7 @@ namespace BlockChane.Service
             {
                 var json = File.ReadAllText("state.json");
 
-                balances = JsonSerializer.Deserialize<Dictionary<string, decimal>>(json)
-                           ?? new Dictionary<string, decimal>();
+                balances = JsonSerializer.Deserialize<Dictionary<string, Dictionary<string, decimal>>>(json) ?? new Dictionary<string, Dictionary<string, decimal>>();
 
                 Console.WriteLine("State snapshot loaded.");
             }
@@ -302,6 +347,32 @@ namespace BlockChane.Service
         public bool MerkleRootExists(string root)
         {
             return Chain.Any(b => b.MerkleRoot == root);
+        }
+
+        public Dictionary<string, decimal> GetAllBalances(string address)
+        {
+            if (!balances.ContainsKey(address))
+                return new Dictionary<string, decimal>();
+
+            return balances[address];
+        }
+
+        public void MintToken(string owner, string token, decimal amount)
+        {
+            var tx = new Transaction(
+                "MINT",
+                owner,
+                amount)
+            {
+                TokenSymbol = token,
+                Fee = 0
+            };
+
+            PendingTransactions.Add(tx);
+
+            Console.WriteLine(
+                $"Mint transaction created ({token})"
+            );
         }
     }
 }

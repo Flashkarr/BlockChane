@@ -1,42 +1,60 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace BlockChane.Models
 {
     public class Transaction
     {
-        public string Id { get; set; }
+        public string Id { get; set; } = Guid.NewGuid().ToString();
 
-        public string From { get; set; }
+        public string From { get; set; } = "";
 
-        public string To { get; set; }
-        public byte[] Signature { get; set; }
+        public string To { get; set; } = "";
 
         public decimal Amount { get; set; }
 
+        public decimal Fee { get; set; } = 1m;
+
+        public string TokenSymbol { get; set; } = "MAIN";
+
         public DateTime TimeStamp { get; set; } = DateTime.UtcNow;
 
-        public int LockTime { get; set; } = 0;
+        public int LockTime { get; set; }
+
+        public byte[] Signature { get; set; } = Array.Empty<byte>();
+
+        public Transaction()
+        {
+        }
+
         public Transaction(string from, string to, decimal amount)
         {
             From = from;
             To = to;
             Amount = amount;
-            Id = Guid.NewGuid().ToString();
         }
 
         public string ToRawString()
         {
-            return $"{From}{To}{Amount}{TimeStamp:O}";
+            return
+                $"{From}" +
+                $"{To}" +
+                $"{Amount}" +
+                $"{Fee}" +
+                $"{TokenSymbol}" +
+                $"{TimeStamp:O}" +
+                $"{LockTime}";
         }
 
         public override string ToString()
         {
-            return $"Transaction: {Id}, From: {From}, To: {To}, Amount: {Amount}, TimeStamp: {TimeStamp}, Signature: {Convert.ToBase64String(Signature)}";
-            ;
+            return
+                $"Id: {Id}\n" +
+                $"From: {From}\n" +
+                $"To: {To}\n" +
+                $"Amount: {Amount}\n" +
+                $"Fee: {Fee}\n" +
+                $"Token: {TokenSymbol}\n" +
+                $"Time: {TimeStamp}\n";
         }
     }
 }

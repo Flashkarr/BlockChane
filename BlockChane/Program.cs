@@ -9,6 +9,9 @@ Console.OutputEncoding = Encoding.UTF8;
 var displayService = new DisplayService();
 var blockchain = new BlockChainService();
 
+var explorer = new BlockchainExplorerService(blockchain);
+var coldWallet = new ColdWalletService();
+
 var crypto = new CryptoService();
 
 var walletAlice = new Wallet(crypto);
@@ -45,6 +48,11 @@ while (true)
     Console.WriteLine("17 - Test VIP Priority");
     Console.WriteLine("18 - Test LockTime");
     Console.WriteLine("19 - SPV перевірка");
+    Console.WriteLine("20 - Create Offline Transaction");
+    Console.WriteLine("21 - Broadcast Transaction From File");
+    Console.WriteLine("22 - Mint Token");
+    Console.WriteLine("23 - Історія гаманця");
+    Console.WriteLine("24 - Show All Balances");
     Console.WriteLine("0 - Вихід");
 
     Console.Write("Вибір: ");
@@ -79,8 +87,10 @@ while (true)
                     fromWallet.PublicKey,
                     toWallet.PublicKey,
                     amount,
-                    fromWallet.PrivateKey
-                );
+                    0.1m,
+                    fromWallet.PrivateKey,
+                    "MAIN"
+                    );
 
                 blockchain.AddTransaction(tx);
                 p2pClient.BroadcastTransactionAsync(tx).Wait();
@@ -158,7 +168,9 @@ while (true)
                     walletAlice.PublicKey,
                     walletBob.PublicKey,
                     1,
-                    walletAlice.PrivateKey
+                    0.1m,
+                    walletAlice.PrivateKey,
+                    "MAIN"
                 );
 
                 blockchain.AddTransaction(tx);
@@ -256,7 +268,9 @@ while (true)
                 walletAlice.PublicKey,
                 walletBob.PublicKey,
                 1,
-                walletAlice.PrivateKey
+                0.1m,
+                walletAlice.PrivateKey,
+                "MAIN"
             );
 
             staleTx.TimeStamp = DateTime.UtcNow.AddSeconds(-120);
@@ -285,7 +299,9 @@ while (true)
                         walletAlice.PublicKey,
                         walletBob.PublicKey,
                         1,
-                        walletAlice.PrivateKey
+                        0.1m,
+                        walletAlice.PrivateKey,
+                        "MAIN"
                     );
 
                     blockchain.AddTransaction(spamTx);
@@ -309,7 +325,9 @@ while (true)
                 walletAlice.PublicKey,
                 walletBob.PublicKey,
                 10,
-                walletAlice.PrivateKey
+                0.1m,
+                walletAlice.PrivateKey,
+                "MAIN"
             );
 
             Thread.Sleep(1000);
@@ -318,7 +336,9 @@ while (true)
                 walletAlice.PublicKey,
                 walletBob.PublicKey,
                 100,
-                walletAlice.PrivateKey
+                1.0m,
+                walletAlice.PrivateKey,
+                "MAIN"
             );
 
             blockchain.AddTransaction(txSmall);
@@ -354,7 +374,9 @@ while (true)
                 walletAlice.PublicKey,
                 walletBob.PublicKey,
                 50,
-                walletAlice.PrivateKey
+                0.1m,
+                walletAlice.PrivateKey,
+                "MAIN"
             );
 
             lockedTx.LockTime = blockchain.Chain.Count + 5;
@@ -414,6 +436,142 @@ while (true)
                 break;
             }
 
+        case "20":
+            {
+                Console.Write("Відправник (1-Alice, 2-Bob): ");
+                var sender = Console.ReadLine();
+
+                Console.Write("Отримувач (1-Alice, 2-Bob): ");
+                var receiver = Console.ReadLine();
+
+                Console.Write("Amount: ");
+                decimal amount = decimal.Parse(Console.ReadLine());
+
+                Console.Write("Fee: ");
+                decimal fee = decimal.Parse(Console.ReadLine());
+
+                var from = sender == "1" ? walletAlice : walletBob;
+                var to = receiver == "1" ? walletAlice : walletBob;
+
+                coldWallet.GenerateOfflineTransaction(
+                    from.PublicKey,
+                    to.PublicKey,
+                    amount,
+                    fee,
+                    from.PrivateKey,
+                    "offline_tx.json"
+                );
+
+                break;
+            }
+
+        case "21":
+            {
+                try
+                {
+                    var tx = coldWallet.LoadOfflineTransaction("offline_tx.json");
+
+                    if (tx == null)
+                        break;
+
+                    if (!coldWallet.VerifyOfflineTransaction(tx))
+                    {
+                        Console.WriteLine("Signature invalid.");
+                        break;
+                    }
+
+                    blockchain.AddTransaction(tx);
+
+                    await p2pClient.BroadcastTransactionAsync(tx);
+
+                    Console.WriteLine("Offline transaction broadcasted.");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Error: {ex.Message}");
+                }
+
+                break;
+            }
+
+        case "22":
+            {
+                Console.Write("Token name: ");
+                string token = Console.ReadLine();
+
+                Console.Write("Amount: ");
+                decimal amount = decimal.Parse(Console.ReadLine());
+
+                blockchain.MintToken(
+                    walletAlice.PublicKey,
+                    token,
+                    amount
+                );
+
+                blockchain.MineBlock(walletAlice.PublicKey);
+
+                Console.WriteLine("Token minted.");
+
+                break;
+            }
+
+        case "23":
+            {
+                Console.WriteLine("1 - Alice");
+                Console.WriteLine("2 - Bob");
+
+                var c = Console.ReadLine();
+
+                var wallet = c == "1"
+                    ? walletAlice
+                    : walletBob;
+
+                var history =
+                    explorer.GetTransactionHistory(wallet.PublicKey);
+
+                foreach (var tx in history)
+                {
+                    Console.WriteLine("--------------------------------");
+
+                    Console.WriteLine($"Id: {tx.Id}");
+
+                    Console.WriteLine($"From: {tx.From}");
+
+                    Console.WriteLine($"To: {tx.To}");
+
+                    Console.WriteLine($"Amount: {tx.Amount}");
+
+                    Console.WriteLine($"Token: {tx.TokenSymbol}");
+
+                    Console.WriteLine($"Fee: {tx.Fee}");
+                }
+
+                break;
+            }
+
+        case "24":
+            {
+                Console.WriteLine("1 - Alice");
+                Console.WriteLine("2 - Bob");
+
+                var c = Console.ReadLine();
+
+                var wallet = c == "1"
+                    ? walletAlice
+                    : walletBob;
+
+                var balances =
+                    blockchain.GetAllBalances(wallet.PublicKey);
+
+                Console.WriteLine();
+
+                foreach (var pair in balances)
+                {
+                    Console.WriteLine($"{pair.Key}: {pair.Value}");
+                }
+
+                break;
+            }
 
         case "0":
             return;
